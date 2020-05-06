@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+// 控制缓存存储和获取
+
 // getter负责当缓存中不存在时，从数据源获取数据
 type Getter interface {
 	Get(key string) ([]byte, error)
@@ -47,7 +49,7 @@ func (g *Group) load(key string) (v ByteView, err error) {
 	return g.getLocal(key)
 }
 
-// 当数据在缓存中没有命中时，从本地数据源中获取(单机情况下)
+// 当数据在缓存中没有命中时，从本地数据源中获取å
 func (g *Group) getLocal(key string) (v ByteView, err error) {
 	bytes, err := g.getter.Get(key)
 	if err != nil {
