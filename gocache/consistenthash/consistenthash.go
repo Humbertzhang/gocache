@@ -36,7 +36,11 @@ func New(replicas int, fn Hash) *Map {
 
 
 // 添加节点
-// TODO: 添加节点后怎么处理之前节点中已有的数据？
+// TODO: QUESTION 添加节点后怎么处理之前节点中已有的数据？
+// ANSWER：一致性Hash不处理节点中已有数据。
+// 一致性Hash：当一个机器下线了之后，仅在该机器上的缓存失效了。
+// 普通的使用hash来解决缓存性能问题：当一个机器下线了之后，所有机器的缓存均失效。
+// 因此一致性Hash相比之前已经解决了很多问题。
 func (m *Map) Add(nodeNames ...string) {
 	for _, nodeName := range nodeNames {
 		for i := 0; i < m.replicas; i++ {
