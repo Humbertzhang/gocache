@@ -1,6 +1,7 @@
 package gocache
 
 import (
+	"./singleflight"
 	"fmt"
 	"log"
 	"sync"
@@ -38,6 +39,27 @@ type Group struct {
 	mainCache 	cache
 	// 流程2时从peer中获取其他节点缓存的数据
 	peers 		PeerPicker
+	// loader 从数据源或其他peer获取数据时，使用singleflight保证不会同时因一个key并发请求
+	loader 		*singleflight.Throttler
+}
+
+func NewGroup(name string, cacheBytes uint64, getter Getter) *Group {
+	if getter == nil {
+		panic("Getter is nil")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	g := &Group{
+		name: name,
+		getter: getter,
+		mainCache: cache{cacheBytes:cacheBytes},
+		loader:	&singleflight.Throttler{},
+	}
+
+	groups[name] = g
+	return g
 }
 
 func (g *Group) RegisterPeers(peers PeerPicker) {
@@ -62,18 +84,30 @@ func (g *Group) Get(key string) (ByteView, error) {
 	return g.load(key)
 }
 
-
+// 从其他地方获取数据。可能从peer的缓存中，也可能从数据源.
 func (g *Group) load(key string) (v ByteView, err error) {
-	if g.peers != nil {
-		if peer, ok := g.peers.PickPeer(key); ok {
-			if v, err = g.getFromPeer(peer, key); err == nil {
-				return v, nil
+	// 负责获取数据的匿名函数
+	getDataFunc := func() (interface{}, error) {
+		// 从peer中获取数据
+		if g.peers != nil {
+			if peer, ok := g.peers.PickPeer(key); ok {
+				if v, err = g.getFromPeer(peer, key); err == nil {
+					return v, nil
+				}
+				log.Println("[GoCache] Failed get from peer:", err)
 			}
-			log.Println("[GoCache] Failed get from peer:", err)
 		}
+		// 尝试从数据源获取数据
+		return g.getLocal(key)
 	}
-	// 尝试从数据源获取数据
-	return g.getLocal(key)
+
+	// vi is the short of value interface
+	// 使用loader避免重复请求
+	vi, err := g.loader.Do(key, getDataFunc)
+	if err == nil {
+		return vi.(ByteView), nil
+	}
+	return
 }
 
 // 本地缓存未命中，尝试在peer中获取缓存
@@ -110,23 +144,7 @@ var (
 	groups  = make(map[string]*Group)
 )
 
-func NewGroup(name string, cacheBytes uint64, getter Getter) *Group {
-	if getter == nil {
-		panic("Getter is nil")
-	}
 
-	g := &Group{
-		name: name,
-		getter: getter,
-		mainCache: cache{cacheBytes:cacheBytes},
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	groups[name] = g
-	return g
-}
 
 
 func GetGroup(name string) *Group {
